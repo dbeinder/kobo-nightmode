@@ -7,7 +7,7 @@
 
 # Shared objects (inc. Windows DLLs)
 *.dll
-*.so
+# *.so #so people can download directly from github
 *.so.*
 *.dylib
 
