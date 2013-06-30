@@ -2,10 +2,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <unistd.h>
+
 #include <fcntl.h>
-#include <string.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <errno.h>
@@ -19,6 +21,8 @@
 #include <linux/mxcfb.h>
 
 #include <asm-generic/ioctl.h>
+
+#include "iniParser/iniparser.h"
 
 
 //for logging, compile with "make debug"
@@ -39,9 +43,13 @@ static void cleanup() __attribute__((destructor));
 int ioctl(int filp, unsigned long cmd, unsigned long arg);
 
 static const char ctlPipe[] = "/tmp/invertScreen";
+static const char configFile[] = "/mnt/onboard/.kobo/nightmode.ini";
 static int (*ioctl_orig)(int filp, unsigned long cmd, unsigned long arg) = NULL;
 static pthread_t cmdReaderThread = 0, buttonReaderThread;
+static dictionary* configIni = NULL;
 static bool inversionActive = false;
+static bool retainState = false;
+static int longPressTimeout = 2000;
 static struct mxcfb_update_data fullUpdRegion, workaroundRegion;
 static int fb0fd = 0;
 
@@ -55,6 +63,24 @@ static void forceUpdate()
         #ifdef SI_DEBUG
         system("dmesg | grep mxc_epdc_fb: > /mnt/onboard/.kobo/screenInvertLogFB");
         #endif
+    }
+}
+
+static void setNewState(bool newState)
+{
+    inversionActive = newState;
+    forceUpdate();
+    
+    if(retainState)
+    {
+        iniparser_set(configIni, "state:invertActiveOnStartup", inversionActive? "yes" : "no");
+        FILE *configFP = fopen(configFile, "w");
+        if(configFP != NULL)
+        {
+            fprintf(configFP, "# config file for kobo-nightmode\n\n");
+            iniparser_dump_ini(configIni, configFP);
+            fclose(configFP);
+        }
     }
 }
 
@@ -77,9 +103,8 @@ static void *buttonReader(void *arg)
         if(err == 0) //nothing to read, but timeout
         {
             timeOut = -1;
-            inversionActive = !inversionActive;
+            setNewState(!inversionActive);
             DEBUGPRINT("ScreenInverter: Toggled using button\n");
-            forceUpdate();
             continue;
         }
         
@@ -92,7 +117,7 @@ static void *buttonReader(void *arg)
             //Buttons:  0x5a -> FrontLight on/off @Glo, 0x66 -> HOME @Touch
             //to see the data for yourself, execute: "hexdump /dev/input/event0"
             if(inputBuffer[6] == 1 && (inputBuffer[5] == 0x5a || inputBuffer[5] == 0x66))
-                timeOut = 2000;
+                timeOut = longPressTimeout;
             else
                 timeOut = -1;
         }
@@ -131,19 +156,16 @@ static void *cmdReader(void *arg) //reader thread
             switch(input)
             {
                 case 't': //toggle
-                    inversionActive = !inversionActive;
+                    setNewState(!inversionActive);
                     DEBUGPRINT("ScreenInverter: Toggled\n");
-                    forceUpdate();
                     break;
                 case 'y': //yes
-                    inversionActive = true;
+                    setNewState(true);
                     DEBUGPRINT("ScreenInverter: Inversion on\n");
-                    forceUpdate();
                     break;
                 case 'n': //no
-                    inversionActive = false;
+                    setNewState(false);
                     DEBUGPRINT("ScreenInverter: Inversion off\n");
-                    forceUpdate();
                     break;
                 case 10: //ignore linefeed
                     break;
@@ -161,18 +183,18 @@ static void initialize()
 {
     ioctl_orig = (int (*)(int filp, unsigned long cmd, unsigned long arg)) dlsym(RTLD_NEXT, "ioctl");
     
+    #ifdef SI_DEBUG
     char execPath[32];
     int end = readlink("/proc/self/exe", execPath, 31);
     execPath[end] = 0;
 
-    #ifdef SI_DEBUG
     remove(SI_DEBUG_LOGPATH);
     #endif
     
     DEBUGPRINT("ScreenInverter: Hooked to %s!\n", execPath);
     
     unsetenv("LD_PRELOAD");
-    DEBUGPRINT("ScreenInverter: Removed LD_PRELOAD!");
+    DEBUGPRINT("ScreenInverter: Removed LD_PRELOAD!\n");
  
     if ((fb0fd = open("/dev/fb0", O_RDWR)) == -1)
     {
@@ -219,10 +241,25 @@ static void initialize()
     mkfifo(ctlPipe, 0600);
     pthread_create(&cmdReaderThread, NULL, cmdReader, NULL);
     pthread_create(&buttonReaderThread, NULL, buttonReader, NULL);
+    
+    configIni = iniparser_load(configFile);
+    if (configIni != NULL)
+    {
+        if(iniparser_getboolean(configIni, "state:invertActiveOnStartup", 0))
+            inversionActive = true;
+        
+        retainState = iniparser_getboolean(configIni, "state:retainStateOverRestart", 0);
+        longPressTimeout = iniparser_getint(configIni, "control:longPressDurationMS", 2000);
+        DEBUGPRINT("ScreenInverter: Read config: invert(%s), retain(%s), longPressTimeout(%d)\n", inversionActive? "yes" : "no", retainState? "yes" : "no", longPressTimeout);
+    }
+    else
+        DEBUGPRINT("ScreenInverter: No config file invalid or not found, using defaults");
 }
 
 static void cleanup()
 {
+    iniparser_freedict(configIni);
+    
     if(cmdReaderThread)
     {
         pthread_cancel(cmdReaderThread);
@@ -239,6 +276,7 @@ int ioctl(int filp, unsigned long cmd, unsigned long arg)
     
     if(inversionActive & (cmd == MXCFB_SEND_UPDATE))
     {
+        DEBUGPRINT("ScreenInverter: changed ioctl!\n");
         ioctl_orig(filp, MXCFB_SEND_UPDATE, (long unsigned)&workaroundRegion);
         //necessary because there's a bug in the driver (or i'm doing it wrong):
         //  i presume the device goes into some powersaving moden when usb und wifi are not used (great for debugging ;-) )

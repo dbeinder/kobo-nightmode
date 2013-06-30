@@ -20,11 +20,26 @@ There are two ways to contol nightmode:
   + Send `n` to set nightmode to OFF
   + Send `t` to toggle
 
-A sample script to toggle is provided in `integration/nightmode.sh`.
-As the Kobo Mini has no physical buttons, the fifo-interface is currently the only way to control nightmode and thus, 
+A sample script to toggle is provided in `extra/nightmode.sh`.
+As the Kobo Mini has no physical buttons, the fifo-interface is currently the only way to control nightmode when running and thus, 
 relies on external tools such as:
 + [Kobo Tweaks](http://www.mobileread.com/forums/showthread.php?t=206180), maintained by ah- (currently not available for 2.6+)
 + [KoboLauncher](http://www.mobileread.com/forums/showthread.php?t=201632), maintained by sergeyvl12
+
+Configuration
+-------------
+The configuration file called `nightmode.ini` is located in your `.kobo` folder:
+```ini
+# config file for kobo-nightmode
+
+[state]
+invertActiveOnStartup = no      # yes / no
+retainStateOverRestart = yes    # yes / no
+
+[control]
+longPressDurationMS = 800       # time in milliseconds to toggle (1000 = 1 second)
+```
+If `retainStateOverRestart` is activated, the value of `invertActiveOnStartup` will modified to reflect the current state.
 
 Installation
 ------------
