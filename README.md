@@ -58,3 +58,7 @@ All you need can be found in Kobo's [Kobo-Reader](https://github.com/kobolabs/Ko
 + An linux tarball for the imx507 platform
 + The gcc-linaro-arm-linux-gnueabihf toolchain to compile
 
+Credits
+-------
++ Nicolas Devillard and others, for the [iniParser](http://github.com/ndevilla/iniparser) library
+
