@@ -23,39 +23,31 @@
 #include <asm-generic/ioctl.h>
 
 #include "iniParser/iniparser.h"
+#include "screenInv.h"
 
-
-//for logging, compile with "make debug"
-#define SI_DEBUG_LOGPATH    "/mnt/onboard/.kobo/screenInvertLog"
-#ifdef SI_DEBUG
-    #define DEBUGPRINT(_fmt, ...) \
-        do { \
-            FILE *logFP = fopen(SI_DEBUG_LOGPATH, "a"); \
-            fprintf(logFP, _fmt, ##__VA_ARGS__); \
-            fclose(logFP); \
-       } while (0)
-#else
-    #define DEBUGPRINT(_fmt, ...) /**/
-#endif
 
 static void initialize() __attribute__((constructor));
 static void cleanup() __attribute__((destructor));
 int ioctl(int filp, unsigned long cmd, unsigned long arg);
 
-static const char ctlPipe[] = "/tmp/invertScreen";
-static const char configFile[] = "/mnt/onboard/.kobo/nightmode.ini";
 static int (*ioctl_orig)(int filp, unsigned long cmd, unsigned long arg) = NULL;
 static pthread_t cmdReaderThread = 0, buttonReaderThread;
-static dictionary* configIni = NULL;
-static bool inversionActive = false;
-static bool retainState = false;
-static int longPressTimeout = 2000;
 static struct mxcfb_update_data fullUpdRegion, workaroundRegion;
 static int fb0fd = 0;
 
+static dictionary* configIni = NULL;
+static bool inversionActive = false;
+static bool retainState = false;
+static int longPressTimeout = 800;
+static int thresholdScreenArea = 0;
+static int nightRefresh = 3;
+static int nightRefreshCnt = 0;
+
+
 static void forceUpdate()
 {
-    int ret = ioctl(fb0fd , MXCFB_SEND_UPDATE, (unsigned long int)&fullUpdRegion);
+	fullUpdRegion.flags = inversionActive? EPDC_FLAG_ENABLE_INVERSION : 0;
+    int ret = ioctl_orig(fb0fd , MXCFB_SEND_UPDATE, (unsigned long int)&fullUpdRegion);
     
     if(ret < 0)
     {
@@ -74,7 +66,7 @@ static void setNewState(bool newState)
     if(retainState)
     {
         iniparser_set(configIni, "state:invertActiveOnStartup", inversionActive? "yes" : "no");
-        FILE *configFP = fopen(configFile, "w");
+        FILE *configFP = fopen(SI_CONFIG_FILE, "w");
         if(configFP != NULL)
         {
             fprintf(configFP, "# config file for kobo-nightmode\n\n");
@@ -126,10 +118,10 @@ static void *buttonReader(void *arg)
     return NULL;
 }
 
-static void *cmdReader(void *arg) //reader thread
+static void *cmdReader(void *arg)
 {
     char input;
-    int fd = open(ctlPipe, O_NONBLOCK);
+    int fd = open(SI_CONTROL_PIPE, O_NONBLOCK);
     
     int epollFD = epoll_create(1);
     struct epoll_event readEvent;
@@ -147,7 +139,7 @@ static void *cmdReader(void *arg) //reader thread
             if(bytesRead == 0) //writing application left the pipe -> reopen
             {
                 close(fd);
-                fd = open(ctlPipe, O_NONBLOCK);
+                fd = open(SI_CONTROL_PIPE, O_NONBLOCK);
                 readEvent.data.fd = fd;
                 epoll_ctl(epollFD, EPOLL_CTL_ADD, fd, &readEvent);
                 continue;
@@ -217,13 +209,15 @@ static void initialize()
     
     DEBUGPRINT("ScreenInverter: Got screen resolution: %dx%d\n", vinfo.xres, vinfo.yres);
     
+    thresholdScreenArea = (SI_AREA_THRESHOLD * vinfo.xres * vinfo.yres) / 100;
+    
     fullUpdRegion.update_marker = 999;
     fullUpdRegion.update_region.top = 0;
     fullUpdRegion.update_region.left = 0;
     fullUpdRegion.update_region.width = vinfo.xres;
     fullUpdRegion.update_region.height = vinfo.yres;
     fullUpdRegion.waveform_mode = WAVEFORM_MODE_AUTO;
-    fullUpdRegion.update_mode = UPDATE_MODE_PARTIAL;
+    fullUpdRegion.update_mode = UPDATE_MODE_FULL;
     fullUpdRegion.temp = TEMP_USE_AMBIENT;
     fullUpdRegion.flags = 0;
     
@@ -237,20 +231,27 @@ static void initialize()
     workaroundRegion.temp = TEMP_USE_AMBIENT;
     workaroundRegion.flags = 0;
     
-    remove(ctlPipe); //just to be sure
-    mkfifo(ctlPipe, 0600);
+    remove(SI_CONTROL_PIPE); //just to be sure
+    mkfifo(SI_CONTROL_PIPE, 0600);
     pthread_create(&cmdReaderThread, NULL, cmdReader, NULL);
     pthread_create(&buttonReaderThread, NULL, buttonReader, NULL);
     
-    configIni = iniparser_load(configFile);
+    configIni = iniparser_load(SI_CONFIG_FILE);
     if (configIni != NULL)
     {
-        if(iniparser_getboolean(configIni, "state:invertActiveOnStartup", 0))
-            inversionActive = true;
+        inversionActive = iniparser_getboolean(configIni, "state:invertActiveOnStartup", 0);
         
         retainState = iniparser_getboolean(configIni, "state:retainStateOverRestart", 0);
-        longPressTimeout = iniparser_getint(configIni, "control:longPressDurationMS", 2000);
-        DEBUGPRINT("ScreenInverter: Read config: invert(%s), retain(%s), longPressTimeout(%d)\n", inversionActive? "yes" : "no", retainState? "yes" : "no", longPressTimeout);
+        longPressTimeout = iniparser_getint(configIni, "control:longPressDurationMS", 800);
+        nightRefresh = iniparser_getint(configIni, "nightmode:refreshScreenPages", 3);
+        
+        if(longPressTimeout < 1) longPressTimeout = 800;
+        if(nightRefresh < 1) nightRefresh = 0;
+        
+        DEBUGPRINT("ScreenInverter: Read config: invert(%s), retain(%s), longPressTimeout(%d), nightRefresh(%d)\n", 
+					inversionActive? "yes" : "no",
+					retainState? "yes" : "no", 
+					longPressTimeout, nightRefresh);
     }
     else
         DEBUGPRINT("ScreenInverter: No config file invalid or not found, using defaults");
@@ -264,7 +265,7 @@ static void cleanup()
     {
         pthread_cancel(cmdReaderThread);
         pthread_cancel(buttonReaderThread);
-        remove(ctlPipe);
+        remove(SI_CONTROL_PIPE);
         close(fb0fd);
         DEBUGPRINT("ScreenInverter: Shut down!\n");
     }
@@ -272,48 +273,45 @@ static void cleanup()
 
 int ioctl(int filp, unsigned long cmd, unsigned long arg)
 {
-    int ret;
-    
     if(inversionActive & (cmd == MXCFB_SEND_UPDATE))
     {
-        DEBUGPRINT("ScreenInverter: changed ioctl!\n");
+		struct mxcfb_update_data *region = (struct mxcfb_update_data *)arg;
+		
+        DEBUGPRINT("ScreenInverter: update: type:%s, size:%dx%d (%d%% updated)\n",
+					region->update_mode == UPDATE_MODE_PARTIAL? "partial" : "full",
+					region->update_region.width, region->update_region.height, 
+					(100*region->update_region.width*region->update_region.height) /
+						(fullUpdRegion.update_region.width*fullUpdRegion.update_region.height));
+        
         ioctl_orig(filp, MXCFB_SEND_UPDATE, (long unsigned)&workaroundRegion);
         //necessary because there's a bug in the driver (or i'm doing it wrong):
-        //  i presume the device goes into some powersaving moden when usb und wifi are not used (great for debugging ;-) )
+        //  i presume the device goes into some powersaving mode when usb und wifi are not used (great for debugging ;-) )
         //  it takes about 10sec after the last touch to enter this mode. after that it is necessary to issue a screenupdate 
         //  without inversion flag, otherwise it will ignore the inversion flag and draw normally (positive).
         //  so i just update a 1px region in the top-right corner, this costs no time and the pixel should be behind the bezel anyway.
         
-        struct mxcfb_update_data *region = (struct mxcfb_update_data *)arg;
-        region->flags ^= EPDC_FLAG_ENABLE_INVERSION;
-        ret = ioctl_orig(filp, cmd, arg);
-        region->flags ^= EPDC_FLAG_ENABLE_INVERSION; //not necessary for nickel, but other apps might not rewrite the request everytime
+        
+        if(nightRefresh)
+        {
+			if(region->update_region.width * region->update_region.height >= thresholdScreenArea)
+			{
+				nightRefreshCnt++;
+				if(nightRefreshCnt == nightRefresh)
+				{	
+					region->update_region.top = 0;
+					region->update_region.left = 0;
+					region->update_region.width = fullUpdRegion.update_region.width;
+					region->update_region.height = fullUpdRegion.update_region.height;
+				    region->update_mode = UPDATE_MODE_FULL;
+				    nightRefreshCnt = 0;
+				}
+				else
+					region->update_mode = UPDATE_MODE_PARTIAL;
+			}
+		}
+		
+		region->flags ^= EPDC_FLAG_ENABLE_INVERSION;
     }
-    else
-        ret = ioctl_orig(filp, cmd, arg);
     
-//     if(cmdReaderThread)
-//     {
-//         char nameBuf[256];
-//         char linkPath[256];
-//         sprintf(linkPath, "/proc/self/fd/%d", filp);
-//         int end = readlink(linkPath, nameBuf, 255);
-//         nameBuf[end] = 0;
-//         printf("IOCTL! dev: %s[%d], cmd: %lu, arg: %lu, ret: %d\n", nameBuf, filp, _IOC_NR(cmd), arg, ret);
-//     }
-    //if(ret < 0) fprintf(logFP, "IOCTLfailed: %s!\n", strerror(errno));
-    //fflush(stdout);
-    return ret;
+    return ioctl_orig(filp, cmd, arg);
 }
-
-/* Code to get the device file from the file descriptor "filp"
-
-    char nameBuf[256];
-    char linkPath[256];
-    sfprintf(logFP, linkPath, "/proc/self/fd/%d", filp);
-    int end = readlink(linkPath, nameBuf, 255);
-    nameBuf[end] = 0;
-    if(!strncmp(nameBuf, "/dev/fb0", 255)) { modify request}
-    
-shouldn't be necessary as IOCTLs *should* be unique, and unambiguously identifiable by "cmd"
-*/
