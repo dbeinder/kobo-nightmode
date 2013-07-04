@@ -38,6 +38,9 @@ retainStateOverRestart = yes    # yes / no
 
 [control]
 longPressDurationMS = 800       # time in milliseconds to toggle (1000 = 1 second)
+
+[nightmode]
+refreshScreenPages = 4  		    #force refresh every X pages
 ```
 If `retainStateOverRestart` is activated, the value of `invertActiveOnStartup` will modified to reflect the current state.
 
