@@ -1,6 +1,11 @@
 CHANGELOG
 =========
 
+build 8
+-------
++ user can now configure refresh rate in nightmode
++ cleanup
+
 build 7
 -------
 + added configuration
