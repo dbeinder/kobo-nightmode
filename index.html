@@ -40,7 +40,7 @@
 <li>Kobo Mini</li>
 </ul><p>Since the update to firmware 2.6+ Kobo has moved to hardware float proccessing, 
 requiring a new toolchain and partly breaking binary compatibility with older software. Currently this hack still works on  firmwares below 2.6, but it is highly recommended to upgrade.
-If you need help or find a bug, check the <a href="http://www.mobileread.com/forums/showthread.php?t=216994">mobileread thread</a>, or create an issue on github.</p>
+If you need help or find a bug, check the <a href="http://www.mobileread.com/forums/showthread.php?t=212162">mobileread thread</a>, or create an issue on github.</p>
 
 <h2>
 <a name="usage" class="anchor" href="#usage"><span class="octicon octicon-link"></span></a>Usage</h2>
@@ -79,6 +79,9 @@ relies on external tools such as:</p>
 
 <span class="k">[control]</span>
 <span class="na">longPressDurationMS</span> <span class="o">=</span> <span class="s">800       # time in milliseconds to toggle (1000 = 1 second)</span>
+
+<span class="k">[nightmode]</span>
+<span class="na">refreshScreenPages</span> <span class="o">=</span> <span class="s">4              #force refresh every X pages</span>
 </pre></div>
 
 <p>If <code>retainStateOverRestart</code> is activated, the value of <code>invertActiveOnStartup</code> will modified to reflect the current state.</p>
@@ -113,7 +116,7 @@ Therefore <code>/etc/init.d/rcS</code> has to be modified to start <code>nickel<
         </section>
 
         <aside id="sidebar">
-          <a href="https://github.com/dbeinder/kobo-nightmode/raw/master/kobo-nightmode_build7.zip" class="button sprite">
+          <a href="https://github.com/dbeinder/kobo-nightmode/raw/master/kobo-nightmode_build8.zip" class="button sprite">
               <small>Download</small> Installer
           </a>
           <a href="https://github.com/dbeinder/kobo-nightmode/zipball/master" class="button">
