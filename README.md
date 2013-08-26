@@ -9,7 +9,7 @@ A tiny hack to read white-on-black on Kobo ebook readers. Works only on the eInk
 
 Since the update to firmware 2.6+ Kobo has moved to hardware float proccessing, 
 requiring a new toolchain and partly breaking binary compatibility with older software. Currently this hack still works on  firmwares below 2.6, but it is highly recommended to upgrade.
-If you need help or find a bug, check the [mobileread thread](http://www.mobileread.com/forums/showthread.php?t=216994), or create an issue on github.
+If you need help or find a bug, check the [mobileread thread](http://www.mobileread.com/forums/showthread.php?t=212162), or create an issue on github.
 
 Usage
 -----
