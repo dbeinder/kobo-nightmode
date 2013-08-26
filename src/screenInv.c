@@ -34,6 +34,7 @@ static int (*ioctl_orig)(int filp, unsigned long cmd, unsigned long arg) = NULL;
 static pthread_t cmdReaderThread = 0, buttonReaderThread;
 static struct mxcfb_update_data fullUpdRegion, workaroundRegion;
 static int fb0fd = 0;
+static time_t configLastChange = 0;
 
 static dictionary* configIni = NULL;
 static bool inversionActive = false;
@@ -42,7 +43,6 @@ static int longPressTimeout = 800;
 static int thresholdScreenArea = 0;
 static int nightRefresh = 3;
 static int nightRefreshCnt = 0;
-
 
 static void forceUpdate()
 {
@@ -58,14 +58,53 @@ static void forceUpdate()
     }
 }
 
+static void readConfigFile(bool readState)
+{
+    configIni = iniparser_load(SI_CONFIG_FILE);
+    if (configIni != NULL)
+    {
+        if(readState)
+            inversionActive = iniparser_getboolean(configIni, "state:invertActive", 0);
+        
+        retainState = iniparser_getboolean(configIni, "state:retainStateOverRestart", 0);
+        longPressTimeout = iniparser_getint(configIni, "control:longPressDurationMS", 800);
+        nightRefresh = iniparser_getint(configIni, "nightmode:refreshScreenPages", 3);
+        
+        if(longPressTimeout < 1) longPressTimeout = 800;
+        if(nightRefresh < 1) nightRefresh = 0;
+        
+        DEBUGPRINT("ScreenInverter: Read config: invert(%s), retain(%s), longPressTimeout(%d), nightRefresh(%d)\n", 
+					inversionActive? "yes" : "no",
+					retainState? "yes" : "no", 
+					longPressTimeout, nightRefresh);
+    }
+    else
+        DEBUGPRINT("ScreenInverter: No config file invalid or not found, using defaults\n");
+}
+
+static time_t getLastConfigChange()
+{
+    struct stat confStat;
+    if(stat(SI_CONFIG_FILE, &confStat))
+    {
+        DEBUGPRINT("ScreenInverter: Could no stat() config file\n");
+        return 0;
+    }
+    
+    return confStat.st_ctime;
+}
+
 static void setNewState(bool newState)
 {
     inversionActive = newState;
     forceUpdate();
     
+    if(getLastConfigChange() != configLastChange)
+        readConfigFile(false);
+    
     if(retainState)
     {
-        iniparser_set(configIni, "state:invertActiveOnStartup", inversionActive? "yes" : "no");
+        iniparser_set(configIni, "state:invertActive", inversionActive? "yes" : "no");
         FILE *configFP = fopen(SI_CONFIG_FILE, "w");
         if(configFP != NULL)
         {
@@ -73,6 +112,8 @@ static void setNewState(bool newState)
             iniparser_dump_ini(configIni, configFP);
             fclose(configFP);
         }
+        
+        configLastChange = getLastConfigChange();
     }
 }
 
@@ -236,25 +277,8 @@ static void initialize()
     pthread_create(&cmdReaderThread, NULL, cmdReader, NULL);
     pthread_create(&buttonReaderThread, NULL, buttonReader, NULL);
     
-    configIni = iniparser_load(SI_CONFIG_FILE);
-    if (configIni != NULL)
-    {
-        inversionActive = iniparser_getboolean(configIni, "state:invertActiveOnStartup", 0);
-        
-        retainState = iniparser_getboolean(configIni, "state:retainStateOverRestart", 0);
-        longPressTimeout = iniparser_getint(configIni, "control:longPressDurationMS", 800);
-        nightRefresh = iniparser_getint(configIni, "nightmode:refreshScreenPages", 3);
-        
-        if(longPressTimeout < 1) longPressTimeout = 800;
-        if(nightRefresh < 1) nightRefresh = 0;
-        
-        DEBUGPRINT("ScreenInverter: Read config: invert(%s), retain(%s), longPressTimeout(%d), nightRefresh(%d)\n", 
-					inversionActive? "yes" : "no",
-					retainState? "yes" : "no", 
-					longPressTimeout, nightRefresh);
-    }
-    else
-        DEBUGPRINT("ScreenInverter: No config file invalid or not found, using defaults");
+    readConfigFile(true);
+    configLastChange = getLastConfigChange();
 }
 
 static void cleanup()
@@ -296,7 +320,7 @@ int ioctl(int filp, unsigned long cmd, unsigned long arg)
 			if(region->update_region.width * region->update_region.height >= thresholdScreenArea)
 			{
 				nightRefreshCnt++;
-				if(nightRefreshCnt == nightRefresh)
+				if(nightRefreshCnt >= nightRefresh)
 				{	
 					region->update_region.top = 0;
 					region->update_region.left = 0;
