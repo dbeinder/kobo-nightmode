@@ -369,6 +369,19 @@ footer a:hover {
 * html .clearfix {height: 1%;}
 .clearfix {display: block;}
 
+.version {
+    border: 2px solid #ebebeb;
+    -webkit-border-radius: 4px;
+       -moz-border-radius: 4px;
+            border-radius: 4px;
+    padding: 0 4px;
+}
+
+.version span {
+    color: DodgerBlue;
+    font-size: 1.3em;
+}
+
 /* #Media Queries
 ================================================== */
 
