@@ -2,10 +2,11 @@ kobo-nightmode
 ==============
 
 A tiny hack to read white-on-black on Kobo ebook readers. Works only on the eInk series:
-+ Kobo Glo
-+ Kobo Touch
-+ Kobo Aura HD
-+ Kobo Mini
++ [Kobo Aura](http://kobo.com/koboaura)
++ [Kobo Aura HD](http://kobo.com/koboaurahd)
++ [Kobo Glo](http://kobo.com/koboglo)
++ [Kobo Touch](http://kobo.com/kobotouch)
++ [Kobo Mini](http://kobo.com/kobomini)
 
 Since the update to firmware 2.6+ Kobo has moved to hardware float proccessing, 
 requiring a new toolchain and partly breaking binary compatibility with older software. Currently this hack still works on  firmwares below 2.6, but it is highly recommended to upgrade.
@@ -23,8 +24,8 @@ There are two ways to contol nightmode:
 A sample script to toggle is provided in `extra/nightmode.sh`.
 As the Kobo Mini has no physical buttons, the fifo-interface is currently the only way to control nightmode when running and thus, 
 relies on external tools such as:
-+ [Kobo Tweaks](http://www.mobileread.com/forums/showthread.php?t=206180), maintained by ah- (currently not available for 2.6+)
 + [KoboLauncher](http://www.mobileread.com/forums/showthread.php?t=201632), maintained by sergeyvl12
++ [Kobo Tweaks](http://www.mobileread.com/forums/showthread.php?t=206180), maintained by ah- (currently not available for 2.6+)
 
 Configuration
 -------------
@@ -37,12 +38,15 @@ invertActiveOnStartup = no      # yes / no
 retainStateOverRestart = yes    # yes / no
 
 [control]
-longPressDurationMS = 800       # time in milliseconds to toggle (1000 = 1 second)
+longPressDurationMS = 800       # time in milliseconds to toggle
 
 [nightmode]
-refreshScreenPages = 4  		    #force refresh every X pages
+refreshScreenPages = 4  		#force refresh every X pages
 ```
-If `retainStateOverRestart` is activated, the value of `invertActiveOnStartup` will modified to reflect the current state.
+`invertActiveOnStartup` determines whether nightmode is active after booting. 
+`retainStateOverRestart` determines whether the state should be kept over a restart.
+`refreshScreenPages` sets the number of pages between screen refreshs when nightmode is active.
+If you want to disable this feature, set it to 0.
 
 Installation
 ------------
@@ -54,6 +58,16 @@ How it works
 This hack works by intercepting and modifying screen-update requests on-the-fly from the main reader application. 
 This is accomplished by interposing the `ioctl()` function using LD_PRELOAD.
 Therefore `/etc/init.d/rcS` has to be modified to start `nickel`, the main app with the `screenInv.so` dynamic library.
+For the Kobo Aura, the inverting has to be done in software due to a kernel bug. By interposing `mmap()`, memory accesses to framebuffer can be redirected into a virtual buffer, from which the inverted data is pushed to the screen.
+
+FAQ
+----
++ I have updated my firmware and it stopped working!
+  + Simply install the mod again, if it still doesn't work post in the thread.
++ Will this drain my battery?
+  + The effect on battery life should be negligible
++ I can see more ghosting when the mod is activated!
+  + This is normal, as eInk screens are optimized for black-on-white mode. Change the refresh rate if it annoys you.
 
 Compile for yourself
 --------------------
@@ -63,5 +77,6 @@ All you need can be found in Kobo's [Kobo-Reader](https://github.com/kobolabs/Ko
 
 Credits
 -------
++ [KevinShort](http://www.mobileread.com/forums/member.php?u=154832), for the idea and a first proof of concept
 + Nicolas Devillard and others, for the [iniParser](http://github.com/ndevilla/iniparser) library
 

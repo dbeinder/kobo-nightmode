@@ -1,6 +1,15 @@
 CHANGELOG
 =========
 
+build 10
+--------
++ supports the new Aura 6' (codename: pheonix)
+  + added software inversion mode due to kernel bug
+
+build 9 
+-------
++ bugfix: prevent overriding of configfile
+
 build 8
 -------
 + user can now configure refresh rate in nightmode

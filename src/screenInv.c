@@ -12,31 +12,44 @@
 #include <pthread.h>
 #include <errno.h>
 
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/epoll.h>
 #include <sys/types.h>
 
+#include <linux/types.h>
 #include <linux/fb.h>
 #include <linux/mxcfb.h>
 
+//alternative headers without function definition
 #include <asm-generic/ioctl.h>
+#include <asm-generic/mman-common.h>
 
 #include "iniParser/iniparser.h"
 #include "screenInv.h"
 
+//interposed funcs
+int ioctl(int filp, unsigned long cmd, unsigned long arg);
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+
+//original funcs
+static int (*ioctl_orig)(int filp, unsigned long cmd, unsigned long arg) = NULL;
+static void* (*mmap_orig)(void *addr, size_t length, int prot, int flags, int fd, off_t offset) = NULL;
+
 
 static void initialize() __attribute__((constructor));
 static void cleanup() __attribute__((destructor));
-int ioctl(int filp, unsigned long cmd, unsigned long arg);
 
-static int (*ioctl_orig)(int filp, unsigned long cmd, unsigned long arg) = NULL;
 static pthread_t cmdReaderThread = 0, buttonReaderThread;
 static struct mxcfb_update_data fullUpdRegion, workaroundRegion;
 static int fb0fd = 0;
+static struct fb_var_screeninfo vinfo;
+static struct fb_fix_screeninfo finfo;
+static uint16_t *fbMemory = NULL;
+static uint16_t *virtualFB = NULL;
 static time_t configLastChange = 0;
 
 static dictionary* configIni = NULL;
+static bool useHWInvert = false;
 static bool inversionActive = false;
 static bool retainState = false;
 static int longPressTimeout = 800;
@@ -46,16 +59,28 @@ static int nightRefreshCnt = 0;
 
 static void forceUpdate()
 {
-	fullUpdRegion.flags = inversionActive? EPDC_FLAG_ENABLE_INVERSION : 0;
-    int ret = ioctl_orig(fb0fd , MXCFB_SEND_UPDATE, (unsigned long int)&fullUpdRegion);
-    
+    int ret = -1;
+
+    if(useHWInvert)
+    {
+	    fullUpdRegion.flags = inversionActive? EPDC_FLAG_ENABLE_INVERSION : 0;
+        ret = ioctl_orig(fb0fd , MXCFB_SEND_UPDATE, (unsigned long int)&fullUpdRegion);
+    }
+    else
+    {
+        fullUpdRegion.flags = 0;
+        ret = ioctl(fb0fd , MXCFB_SEND_UPDATE, (unsigned long int)&fullUpdRegion);
+    }
+	
+    #ifdef SI_DEBUG
     if(ret < 0)
     {
         DEBUGPRINT("ScreenInverter: Full redraw failed! Error %d: %s\n", ret, strerror(errno));
-        #ifdef SI_DEBUG
         system("dmesg | grep mxc_epdc_fb: > /mnt/onboard/.kobo/screenInvertLogFB");
-        #endif
     }
+	#else
+	ret++; //avoid compiler warning ;)
+    #endif
 }
 
 static void readConfigFile(bool readState)
@@ -69,7 +94,13 @@ static void readConfigFile(bool readState)
         retainState = iniparser_getboolean(configIni, "state:retainStateOverRestart", 0);
         longPressTimeout = iniparser_getint(configIni, "control:longPressDurationMS", 800);
         nightRefresh = iniparser_getint(configIni, "nightmode:refreshScreenPages", 3);
-        
+		
+		if(iniparser_getboolean(configIni, "nightmode:forceSWInvert", 0))
+		{
+			DEBUGPRINT("ScreenInverter: Forcing SW inversion mode!\n");
+			useHWInvert = false;
+        }
+		
         if(longPressTimeout < 1) longPressTimeout = 800;
         if(nightRefresh < 1) nightRefresh = 0;
         
@@ -79,7 +110,7 @@ static void readConfigFile(bool readState)
 					longPressTimeout, nightRefresh);
     }
     else
-        DEBUGPRINT("ScreenInverter: No config file invalid or not found, using defaults\n");
+        DEBUGPRINT("ScreenInverter: Config file invalid or not found, using defaults\n");
 }
 
 static time_t getLastConfigChange()
@@ -215,7 +246,8 @@ static void *cmdReader(void *arg)
 static void initialize()
 {
     ioctl_orig = (int (*)(int filp, unsigned long cmd, unsigned long arg)) dlsym(RTLD_NEXT, "ioctl");
-    
+    mmap_orig = (void* (*)(void *addr, size_t length, int prot, int flags, int fd, off_t offset)) dlsym(RTLD_NEXT, "mmap");
+	
     #ifdef SI_DEBUG
     char execPath[32];
     int end = readlink("/proc/self/exe", execPath, 31);
@@ -229,6 +261,36 @@ static void initialize()
     unsetenv("LD_PRELOAD");
     DEBUGPRINT("ScreenInverter: Removed LD_PRELOAD!\n");
  
+    //read device
+    FILE *devReader = NULL;
+    char codename[32];
+    DEBUGPRINT("ScreenInverter: Reading device type: ");
+    if((devReader = popen("/bin/kobo_config.sh", "r")) < 0)
+    {
+	    DEBUGPRINT("... failed!\n");
+	    return;
+    }
+
+    fgets(codename, sizeof(codename)-1, devReader);
+    
+    int lastChar = strlen(codename)-1;
+    if(codename[lastChar] == '\n')
+	    codename[lastChar] = 0;
+    
+    DEBUGPRINT("%s\n", codename);
+    if( !strcmp("pixie", codename) || 
+	    !strcmp("trilogy", codename) ||
+	    !strcmp("kraken", codename) ||
+	    !strcmp("dragon", codename))
+    {
+	    useHWInvert = true;
+	    DEBUGPRINT("ScreenInverter: Device supports HW invert!\n");
+    }
+    else
+	    DEBUGPRINT("ScreenInverter: No HW inversion support, falling back to SW.\n");
+    
+    pclose(devReader);
+    
     if ((fb0fd = open("/dev/fb0", O_RDWR)) == -1)
     {
         DEBUGPRINT("ScreenInverter: Error opening /dev/fb0!\n");
@@ -239,16 +301,35 @@ static void initialize()
     }
     
     //get the screen's resolution
-    struct fb_var_screeninfo vinfo;
-    if (ioctl_orig(fb0fd, FBIOGET_VSCREENINFO, (long unsigned)&vinfo) < 0) {
+    if (ioctl_orig(fb0fd, FBIOGET_VSCREENINFO, (long unsigned)&vinfo) < 0)
+    {
 		DEBUGPRINT("ScreenInverter: Couldn't get display dimensions!\n");
 		
         close(fb0fd);
         DEBUGPRINT("ScreenInverter: Disabled!\n");
         return;
 	}
-    
-    DEBUGPRINT("ScreenInverter: Got screen resolution: %dx%d\n", vinfo.xres, vinfo.yres);
+
+    //fixed framebuffer data
+    if (ioctl_orig(fb0fd, FBIOGET_FSCREENINFO, (long unsigned)&finfo) < 0)
+    {
+		DEBUGPRINT("ScreenInverter: Couldn't get framebuffer infos!\n");
+		
+        close(fb0fd);
+        DEBUGPRINT("ScreenInverter: Disabled!\n");
+        return;
+	}
+	
+    fbMemory = (uint16_t*) mmap(0, finfo.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb0fd, 0);
+
+	if ((int)fbMemory == -1) {
+		DEBUGPRINT("ScreenInverter: Failed to map framebuffer device to memory.\n");
+
+        close(fb0fd);
+		return;
+	}
+
+    DEBUGPRINT("ScreenInverter: Got screen resolution: %dx%d @%dBPP\n", vinfo.xres, vinfo.yres, vinfo.bits_per_pixel);
     
     thresholdScreenArea = (SI_AREA_THRESHOLD * vinfo.xres * vinfo.yres) / 100;
     
@@ -279,6 +360,11 @@ static void initialize()
     
     readConfigFile(true);
     configLastChange = getLastConfigChange();
+	
+	if(!useHWInvert)
+	{
+		virtualFB = (uint16_t *) mmap(NULL, finfo.smem_len, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+	}
 }
 
 static void cleanup()
@@ -295,28 +381,45 @@ static void cleanup()
     }
 }
 
+static void swCopyRegion(struct mxcfb_update_data *region)
+{
+    for(int xp = region->update_region.left; xp < region->update_region.left + region->update_region.width; xp++)
+    {
+        for(int yp = region->update_region.top; yp < region->update_region.top + region->update_region.height; yp++)
+        {
+            int addr = ((yp+vinfo.yoffset) * finfo.line_length/2 + xp + vinfo.xoffset);
+            fbMemory[addr] = virtualFB[addr];
+        }
+    }
+}
+
+static void swInvertCopy(struct mxcfb_update_data *region)
+{
+    for(int xp = region->update_region.left; xp < region->update_region.left + region->update_region.width; xp++)
+    {
+        for(int yp = region->update_region.top; yp < region->update_region.top + region->update_region.height; yp++)
+        {
+            int addr = ((yp+vinfo.yoffset) * finfo.line_length/2 + xp + vinfo.xoffset);
+            fbMemory[addr] = 0xffff - virtualFB[addr];
+        }
+    }
+}
+
 int ioctl(int filp, unsigned long cmd, unsigned long arg)
 {
-    if(inversionActive & (cmd == MXCFB_SEND_UPDATE))
+    if(cmd == MXCFB_SEND_UPDATE)
     {
+	
 		struct mxcfb_update_data *region = (struct mxcfb_update_data *)arg;
-		
-        DEBUGPRINT("ScreenInverter: update: type:%s, size:%dx%d (%d%% updated)\n",
-					region->update_mode == UPDATE_MODE_PARTIAL? "partial" : "full",
+
+		DEBUGPRINT("ScreenInverter: update: type:%s, flags:0x%x, size:%dx%d (%d%% updated)\n",
+					region->update_mode == UPDATE_MODE_PARTIAL? "partial" : "full", region->flags,
 					region->update_region.width, region->update_region.height, 
 					(100*region->update_region.width*region->update_region.height) /
-						(fullUpdRegion.update_region.width*fullUpdRegion.update_region.height));
-        
-        ioctl_orig(filp, MXCFB_SEND_UPDATE, (long unsigned)&workaroundRegion);
-        //necessary because there's a bug in the driver (or i'm doing it wrong):
-        //  i presume the device goes into some powersaving mode when usb und wifi are not used (great for debugging ;-) )
-        //  it takes about 10sec after the last touch to enter this mode. after that it is necessary to issue a screenupdate 
-        //  without inversion flag, otherwise it will ignore the inversion flag and draw normally (positive).
-        //  so i just update a 1px region in the top-right corner, this costs no time and the pixel should be behind the bezel anyway.
-        
-        
-        if(nightRefresh)
-        {
+					(fullUpdRegion.update_region.width*fullUpdRegion.update_region.height));
+	
+		if(inversionActive && nightRefresh)
+		{
 			if(region->update_region.width * region->update_region.height >= thresholdScreenArea)
 			{
 				nightRefreshCnt++;
@@ -326,16 +429,54 @@ int ioctl(int filp, unsigned long cmd, unsigned long arg)
 					region->update_region.left = 0;
 					region->update_region.width = fullUpdRegion.update_region.width;
 					region->update_region.height = fullUpdRegion.update_region.height;
-				    region->update_mode = UPDATE_MODE_FULL;
-				    nightRefreshCnt = 0;
+					region->update_mode = UPDATE_MODE_FULL;
+					nightRefreshCnt = 0;
 				}
 				else
 					region->update_mode = UPDATE_MODE_PARTIAL;
 			}
 		}
 		
-		region->flags ^= EPDC_FLAG_ENABLE_INVERSION;
-    }
-    
+		if(useHWInvert)
+		{
+			if(inversionActive)
+			{
+				ioctl_orig(filp, MXCFB_SEND_UPDATE, (long unsigned)&workaroundRegion);
+				//necessary because there's a bug in the driver (or i'm doing it wrong):
+				//  i presume the device goes into some powersaving mode when usb und wifi are not used (great for debugging ^^)
+				//  it takes about 10sec after the last touch to enter this mode. after that it is necessary to issue a screenupdate 
+				//  without inversion flag, otherwise it will ignore the inversion flag and draw normally (positive).
+				//  so i just update a 1px region in the top-right corner, this costs no time and the pixel should be behind the bezel anyway.
+		
+				region->flags ^= EPDC_FLAG_ENABLE_INVERSION;
+			}
+		}
+		else
+		{
+			if(inversionActive)
+				swInvertCopy(region);
+			else
+				swCopyRegion(region);
+		}
+    }			
+			
     return ioctl_orig(filp, cmd, arg);
+}
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
+{
+	if(!useHWInvert && length == finfo.smem_len)
+	{
+		char link[32];
+		char path[32];
+		sprintf(link, "/proc/self/fd/%d", fd);
+		int end = readlink(link, path, 31);
+		path[end] = 0;
+		if(strncmp("/dev/fb0", path, 31) == 0) //okay, nickel is mmap'ing the framebuffer
+		{
+			DEBUGPRINT("ScreenInverter: mmap'ed the virtual framebuffer!\n");
+			return virtualFB;
+		}
+	}
+	return mmap_orig(addr, length, prot, flags, fd, offset);
 }
