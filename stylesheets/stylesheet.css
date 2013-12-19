@@ -325,12 +325,12 @@ blockquote {
   padding: 0 0 0 30px;
 }
 
-ul li {
+ul {
   list-style: disc inside;
   padding-left: 20px;
 }
 
-ol li {
+ol {
   list-style: decimal inside;
   padding-left: 3px;
 }
@@ -368,20 +368,6 @@ footer a:hover {
 .clearfix {display: inline-block;}
 * html .clearfix {height: 1%;}
 .clearfix {display: block;}
-
-.version {
-    border: 2px solid #ebebeb;
-    -webkit-border-radius: 4px;
-       -moz-border-radius: 4px;
-            border-radius: 4px;
-    padding: 0 4px;
-}
-
-.version span {
-    color: DodgerBlue;
-    font-size: 1.3em;
-}
-
 
 /* #Media Queries
 ================================================== */

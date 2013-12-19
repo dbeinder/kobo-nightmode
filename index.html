@@ -34,10 +34,11 @@
 <p>A tiny hack to read white-on-black on Kobo ebook readers. Works only on the eInk series:</p>
 
 <ul>
-<li>Kobo Glo</li>
-<li>Kobo Touch</li>
-<li>Kobo Aura HD</li>
-<li>Kobo Mini</li>
+<li><a href="http://kobo.com/koboaura">Kobo Aura</a></li>
+<li><a href="http://kobo.com/koboaurahd">Kobo Aura HD</a></li>
+<li><a href="http://kobo.com/koboglo">Kobo Glo</a></li>
+<li><a href="http://kobo.com/kobotouch">Kobo Touch</a></li>
+<li><a href="http://kobo.com/kobomini">Kobo Mini</a></li>
 </ul><p>Since the update to firmware 2.6+ Kobo has moved to hardware float proccessing, 
 requiring a new toolchain and partly breaking binary compatibility with older software. Currently this hack still works on  firmwares below 2.6, but it is highly recommended to upgrade.
 If you need help or find a bug, check the <a href="http://www.mobileread.com/forums/showthread.php?t=212162">mobileread thread</a>, or create an issue on github.</p>
@@ -63,28 +64,31 @@ relies on external tools such as:</p>
 
 <ul>
 <li>
-<a href="http://www.mobileread.com/forums/showthread.php?t=206180">Kobo Tweaks</a>, maintained by ah- (currently not available for 2.6+)</li>
-<li>
 <a href="http://www.mobileread.com/forums/showthread.php?t=201632">KoboLauncher</a>, maintained by sergeyvl12</li>
+<li>
+<a href="http://www.mobileread.com/forums/showthread.php?t=206180">Kobo Tweaks</a>, maintained by ah- (currently not available for 2.6+)</li>
 </ul><h2>
 <a name="configuration" class="anchor" href="#configuration"><span class="octicon octicon-link"></span></a>Configuration</h2>
 
 <p>The configuration file called <code>nightmode.ini</code> is located in your <code>.kobo</code> folder:</p>
 
-<div class="highlight"><pre><span class="c1"># config file for kobo-nightmode</span>
+<div class="highlight highlight-ini"><pre><span class="c1"># config file for kobo-nightmode</span>
 
 <span class="k">[state]</span>
 <span class="na">invertActiveOnStartup</span> <span class="o">=</span> <span class="s">no      # yes / no</span>
 <span class="na">retainStateOverRestart</span> <span class="o">=</span> <span class="s">yes    # yes / no</span>
 
 <span class="k">[control]</span>
-<span class="na">longPressDurationMS</span> <span class="o">=</span> <span class="s">800       # time in milliseconds to toggle (1000 = 1 second)</span>
+<span class="na">longPressDurationMS</span> <span class="o">=</span> <span class="s">800       # time in milliseconds to toggle</span>
 
 <span class="k">[nightmode]</span>
-<span class="na">refreshScreenPages</span> <span class="o">=</span> <span class="s">4              #force refresh every X pages</span>
+<span class="na">refreshScreenPages</span> <span class="o">=</span> <span class="s">4          #force refresh every X pages</span>
 </pre></div>
 
-<p>If <code>retainStateOverRestart</code> is activated, the value of <code>invertActiveOnStartup</code> will modified to reflect the current state.</p>
+<p><code>invertActiveOnStartup</code> determines whether nightmode is active after booting. 
+<code>retainStateOverRestart</code> determines whether the state should be kept over a restart.
+<code>refreshScreenPages</code> sets the number of pages between screen refreshs when nightmode is active.
+If you want to disable this feature, set it to 0.</p>
 
 <h2>
 <a name="installation" class="anchor" href="#installation"><span class="octicon octicon-link"></span></a>Installation</h2>
@@ -97,9 +101,32 @@ Simply copy one of them into the .kobo folder on your device, safely remove, and
 
 <p>This hack works by intercepting and modifying screen-update requests on-the-fly from the main reader application. 
 This is accomplished by interposing the <code>ioctl()</code> function using LD_PRELOAD.
-Therefore <code>/etc/init.d/rcS</code> has to be modified to start <code>nickel</code>, the main app with the <code>screenInv.so</code> dynamic library.</p>
+Therefore <code>/etc/init.d/rcS</code> has to be modified to start <code>nickel</code>, the main app with the <code>screenInv.so</code> dynamic library.
+For the Kobo Aura, the inverting has to be done in software due to a kernel bug. By interposing <code>mmap()</code>, memory accesses to framebuffer can be redirected into a virtual buffer, from which the inverted data is pushed to the screen.</p>
 
 <h2>
+<a name="faq" class="anchor" href="#faq"><span class="octicon octicon-link"></span></a>FAQ</h2>
+
+<ul>
+<li>I have updated my firmware and it stopped working!
+
+<ul>
+<li>Simply install the mod again, if it still doesn't work post in the thread.</li>
+</ul>
+</li>
+<li>Will this drain my battery?
+
+<ul>
+<li>The effect on battery life should be negligible</li>
+</ul>
+</li>
+<li>I can see more ghosting when the mod is activated!
+
+<ul>
+<li>This is normal, as eInk screens are optimized for black-on-white mode. Change the refresh rate if it annoys you.</li>
+</ul>
+</li>
+</ul><h2>
 <a name="compile-for-yourself" class="anchor" href="#compile-for-yourself"><span class="octicon octicon-link"></span></a>Compile for yourself</h2>
 
 <p>All you need can be found in Kobo's <a href="https://github.com/kobolabs/Kobo-Reader">Kobo-Reader</a> repository:</p>
@@ -111,26 +138,25 @@ Therefore <code>/etc/init.d/rcS</code> has to be modified to start <code>nickel<
 <a name="credits" class="anchor" href="#credits"><span class="octicon octicon-link"></span></a>Credits</h2>
 
 <ul>
+<li>
+<a href="http://www.mobileread.com/forums/member.php?u=154832">KevinShort</a>, for the idea and a first proof of concept</li>
 <li>Nicolas Devillard and others, for the <a href="http://github.com/ndevilla/iniparser">iniParser</a> library</li>
 </ul>
         </section>
 
         <aside id="sidebar">
-          <a href="https://github.com/dbeinder/kobo-nightmode/raw/master/kobo-nightmode_build8.zip" class="button sprite">
-              <small>Download</small> Installer
-          </a>
           <a href="https://github.com/dbeinder/kobo-nightmode/zipball/master" class="button">
-            <small>Download source</small>
+            <small>Download</small>
             .zip file
           </a>
           <a href="https://github.com/dbeinder/kobo-nightmode/tarball/master" class="button">
-            <small>Download source</small>
+            <small>Download</small>
             .tar.gz file
           </a>
 
-          <p class="repo-owner"><a href="https://github.com/dbeinder/kobo-nightmode">kobo-nightmode</a> is maintained by <a href="https://github.com/dbeinder">dbeinder</a>.</p>
+          <p class="repo-owner"><a href="https://github.com/dbeinder/kobo-nightmode"></a> is maintained by <a href="https://github.com/dbeinder">dbeinder</a>.</p>
 
-          <p>This page was generated by <a href="pages.github.com">GitHub Pages</a> using the Architect theme by <a href="https://twitter.com/jasonlong">Jason Long</a>.</p>
+          <p>This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the Architect theme by <a href="https://twitter.com/jasonlong">Jason Long</a>.</p>
         </aside>
       </div>
     </div>
