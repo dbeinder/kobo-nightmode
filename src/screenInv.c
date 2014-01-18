@@ -431,9 +431,17 @@ int ioctl(int filp, unsigned long cmd, unsigned long arg)
 					region->update_region.height = fullUpdRegion.update_region.height;
 					region->update_mode = UPDATE_MODE_FULL;
 					nightRefreshCnt = 0;
+					DEBUGPRINT("ScreenInverter: nightRefresh: refreshing screen\n");
 				}
 				else
+				{
 					region->update_mode = UPDATE_MODE_PARTIAL;
+					DEBUGPRINT("ScreenInverter: nightRefresh: no refresh, page %d\n", nightRefreshCnt);
+				}
+			}
+			else
+			{
+				DEBUGPRINT("ScreenInverter: nightRefresh: small update, ignoring\n");
 			}
 		}
 		
