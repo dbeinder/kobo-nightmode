@@ -320,7 +320,7 @@ static void initialize()
         return;
 	}
 	
-    fbMemory = (uint16_t*) mmap(0, finfo.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb0fd, 0);
+    fbMemory = (uint16_t*) mmap_orig(0, finfo.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb0fd, 0);
 
 	if ((int)fbMemory == -1) {
 		DEBUGPRINT("ScreenInverter: Failed to map framebuffer device to memory.\n");
@@ -363,7 +363,7 @@ static void initialize()
 	
 	if(!useHWInvert)
 	{
-		virtualFB = (uint16_t *) mmap(NULL, finfo.smem_len, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+		virtualFB = (uint16_t *) mmap_orig(NULL, finfo.smem_len, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
 	}
 }
 
