@@ -78,5 +78,6 @@ All you need can be found in Kobo's [Kobo-Reader](https://github.com/kobolabs/Ko
 Credits
 -------
 + [KevinShort](http://www.mobileread.com/forums/member.php?u=154832), for the idea and a first proof of concept
++ [GitHub contributers](https://github.com/dbeinder/kobo-nightmode/graphs/contributors)
 + Nicolas Devillard and others, for the [iniParser](http://github.com/ndevilla/iniparser) library
 

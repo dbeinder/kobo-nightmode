@@ -1,6 +1,11 @@
 CHANGELOG
 =========
 
+build 11
+--------
++ fixed segfault (thanks to KenMacD)
++ added some debug code for forced refresh
+
 build 10
 --------
 + supports the new Aura 6' (codename: pheonix)
