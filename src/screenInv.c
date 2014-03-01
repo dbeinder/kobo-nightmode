@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +16,7 @@
 
 #include <sys/stat.h>
 #include <sys/epoll.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include <linux/types.h>
@@ -243,6 +246,29 @@ static void *cmdReader(void *arg)
     return NULL;
 }
 
+static bool updateVarScreenInfo()
+{
+    if (ioctl_orig(fb0fd, FBIOGET_FSCREENINFO, (long unsigned)&finfo) < 0)
+    {
+		DEBUGPRINT("ScreenInverter: Couldn't get framebuffer infos!\n");
+        return false;
+	}
+	
+	if (ioctl_orig(fb0fd, FBIOGET_VSCREENINFO, (long unsigned)&vinfo) < 0)
+    {
+		DEBUGPRINT("ScreenInverter: Couldn't get display dimensions!\n");
+		return false;
+	}
+	
+    DEBUGPRINT("ScreenInverter: Got screen resolution: %dx%d @%dBPP, at %d° degrees rotation\n", vinfo.xres, vinfo.yres, vinfo.bits_per_pixel, 90*vinfo.rotate);
+    thresholdScreenArea = (SI_AREA_THRESHOLD * vinfo.xres * vinfo.yres) / 100;
+    
+    fullUpdRegion.update_region.width = vinfo.xres;
+    fullUpdRegion.update_region.height = vinfo.yres;
+	
+	return true;
+}
+
 static void initialize()
 {
     ioctl_orig = (int (*)(int filp, unsigned long cmd, unsigned long arg)) dlsym(RTLD_NEXT, "ioctl");
@@ -301,20 +327,8 @@ static void initialize()
     }
     
     //get the screen's resolution
-    if (ioctl_orig(fb0fd, FBIOGET_VSCREENINFO, (long unsigned)&vinfo) < 0)
-    {
-		DEBUGPRINT("ScreenInverter: Couldn't get display dimensions!\n");
-		
-        close(fb0fd);
-        DEBUGPRINT("ScreenInverter: Disabled!\n");
-        return;
-	}
-
-    //fixed framebuffer data
-    if (ioctl_orig(fb0fd, FBIOGET_FSCREENINFO, (long unsigned)&finfo) < 0)
-    {
-		DEBUGPRINT("ScreenInverter: Couldn't get framebuffer infos!\n");
-		
+	if(!updateVarScreenInfo())
+	{
         close(fb0fd);
         DEBUGPRINT("ScreenInverter: Disabled!\n");
         return;
@@ -329,15 +343,9 @@ static void initialize()
 		return;
 	}
 
-    DEBUGPRINT("ScreenInverter: Got screen resolution: %dx%d @%dBPP\n", vinfo.xres, vinfo.yres, vinfo.bits_per_pixel);
-    
-    thresholdScreenArea = (SI_AREA_THRESHOLD * vinfo.xres * vinfo.yres) / 100;
-    
-    fullUpdRegion.update_marker = 999;
+	fullUpdRegion.update_marker = 999;
     fullUpdRegion.update_region.top = 0;
     fullUpdRegion.update_region.left = 0;
-    fullUpdRegion.update_region.width = vinfo.xres;
-    fullUpdRegion.update_region.height = vinfo.yres;
     fullUpdRegion.waveform_mode = WAVEFORM_MODE_AUTO;
     fullUpdRegion.update_mode = UPDATE_MODE_FULL;
     fullUpdRegion.temp = TEMP_USE_AMBIENT;
@@ -381,29 +389,55 @@ static void cleanup()
     }
 }
 
-static void swCopyRegion(struct mxcfb_update_data *region)
+static void swCopyRegion(struct mxcfb_rect *region)
 {
-    for(int xp = region->update_region.left; xp < region->update_region.left + region->update_region.width; xp++)
+	int pixelPerLine = finfo.line_length / 2;
+	int deltaToNextLine = pixelPerLine - region->width;
+	int addr = region->top * pixelPerLine + region->left;
+	int xStart = region->width;
+	
+	for(int yCnt = region->height; yCnt != 0; yCnt--)
     {
-        for(int yp = region->update_region.top; yp < region->update_region.top + region->update_region.height; yp++)
-        {
-            int addr = ((yp+vinfo.yoffset) * finfo.line_length/2 + xp + vinfo.xoffset);
-            fbMemory[addr] = virtualFB[addr];
-        }
-    }
+		for(int xCnt = xStart; xCnt != 0; xCnt--)
+		{
+			fbMemory[addr] = virtualFB[addr];
+			addr++;
+		}
+		
+		addr += deltaToNextLine;
+	}
 }
 
-static void swInvertCopy(struct mxcfb_update_data *region)
+static void swInvertCopy(struct mxcfb_rect *region)
 {
-    for(int xp = region->update_region.left; xp < region->update_region.left + region->update_region.width; xp++)
+	int pixelPerLine = finfo.line_length / 2;
+	int deltaToNextLine = pixelPerLine - region->width;
+	int addr = region->top * pixelPerLine + region->left;
+	int xStart = region->width;
+	
+	for(int yCnt = region->height; yCnt != 0; yCnt--)
     {
-        for(int yp = region->update_region.top; yp < region->update_region.top + region->update_region.height; yp++)
-        {
-            int addr = ((yp+vinfo.yoffset) * finfo.line_length/2 + xp + vinfo.xoffset);
-            fbMemory[addr] = 0xffff - virtualFB[addr];
-        }
-    }
+		for(int xCnt = xStart; xCnt != 0; xCnt--)
+		{
+			fbMemory[addr] = 0xffff - virtualFB[addr];
+			addr++;
+		}
+		
+		addr += deltaToNextLine;
+	}
 }
+/*
+void benchmark(struct mxcfb_rect *region)
+{
+	struct timeval stop, start;
+	
+	gettimeofday(&start, NULL);
+	for(int i = 0; i < 10; i++)
+	swCopyRegion(region);
+	gettimeofday(&stop, NULL);
+	uint64_t diff = ((uint64_t)stop.tv_sec * 1000000 + (uint64_t)stop.tv_usec) - ((uint64_t)start.tv_sec * 1000000 + (uint64_t)start.tv_usec);
+	DEBUGPRINT("10x copy took %" PRIu64 "\n", diff);
+}*/
 
 int ioctl(int filp, unsigned long cmd, unsigned long arg)
 {
@@ -462,11 +496,18 @@ int ioctl(int filp, unsigned long cmd, unsigned long arg)
 		else
 		{
 			if(inversionActive)
-				swInvertCopy(region);
+				swInvertCopy(&region->update_region);
 			else
-				swCopyRegion(region);
+				swCopyRegion(&region->update_region);
 		}
-    }			
+    } 
+	else if(cmd == FBIOPUT_VSCREENINFO)
+	{
+		DEBUGPRINT("ScreenInverter: Screen dimensions changed, updating...\n");
+		int ret =  ioctl_orig(filp, cmd, arg); //neccessary, since the kernel makes changes to var & fix infos
+		updateVarScreenInfo();
+		return ret;
+	}			
 			
     return ioctl_orig(filp, cmd, arg);
 }

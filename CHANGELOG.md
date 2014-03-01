@@ -1,6 +1,12 @@
 CHANGELOG
 =========
 
+build 12
+--------
++ kobo fw 3.2.0 changes the screen orientation, this is now intercepted
++ optimized copy routine for virtual framebuffer
++ added gcc optimization flag
+
 build 11
 --------
 + fixed segfault (thanks to KenMacD)
