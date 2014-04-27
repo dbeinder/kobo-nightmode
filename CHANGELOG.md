@@ -1,6 +1,12 @@
 CHANGELOG
 =========
 
+build 13
+--------
++ support for kobo fw 3.3.0
+  + stopping EVIOCGRAB ioctl to allow access to the buttons
+  + updated installer due to new nickel startup line
+
 build 12
 --------
 + kobo fw 3.2.0 changes the screen orientation, this is now intercepted

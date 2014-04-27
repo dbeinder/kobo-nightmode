@@ -23,12 +23,15 @@
 #include <linux/fb.h>
 #include <linux/mxcfb.h>
 
+
 //alternative headers without function definition
 #include <asm-generic/ioctl.h>
 #include <asm-generic/mman-common.h>
 
 #include "iniParser/iniparser.h"
 #include "screenInv.h"
+
+#define EVIOCGRAB		_IOW('E', 0x90, int)
 
 //interposed funcs
 int ioctl(int filp, unsigned long cmd, unsigned long arg);
@@ -507,7 +510,12 @@ int ioctl(int filp, unsigned long cmd, unsigned long arg)
 		int ret =  ioctl_orig(filp, cmd, arg); //neccessary, since the kernel makes changes to var & fix infos
 		updateVarScreenInfo();
 		return ret;
-	}			
+	}
+    else if(cmd == EVIOCGRAB)
+    {
+        DEBUGPRINT("ScreenInverter: Ignoring nickels request for exclusive access to /dev/input/event0\n");
+        return 0;
+    }		
 			
     return ioctl_orig(filp, cmd, arg);
 }

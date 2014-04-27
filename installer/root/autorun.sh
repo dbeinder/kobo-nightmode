@@ -1,13 +1,17 @@
 #!/bin/sh
 
-OLD_START="/usr/local/Kobo/nickel -qws \&"
-NEW_START="LD_PRELOAD=/root/screenInv.so /usr/local/Kobo/nickel -qws \&"
+FW1_ORIG="/usr/local/Kobo/nickel -qws \&"
+FW1_NEW="LD_PRELOAD=/root/screenInv.so /usr/local/Kobo/nickel -qws \&"
 
-NEWFW_OLD_START="/usr/local/Kobo/nickel -qws -skipFontLoad \&"
-NEWFW_NEW_START="LD_PRELOAD=/root/screenInv.so /usr/local/Kobo/nickel -qws -skipFontLoad \&"
+FW2_ORIG="/usr/local/Kobo/nickel -qws -skipFontLoad \&"
+FW2_NEW="LD_PRELOAD=/root/screenInv.so /usr/local/Kobo/nickel -qws -skipFontLoad \&"
 
-sed -i "s;^$OLD_START;$NEW_START;" /etc/init.d/rcS
-sed -i "s;^$NEWFW_OLD_START;$NEWFW_NEW_START;" /etc/init.d/rcS
+FW3_ORIG="/usr/local/Kobo/nickel -platform kobo -skipFontLoad \&"
+FW3_NEW="LD_PRELOAD=/root/screenInv.so /usr/local/Kobo/nickel -platform kobo -skipFontLoad \&"
+
+sed -i "s;^$FW1_ORIG;$FW1_NEW;" /etc/init.d/rcS
+sed -i "s;^$FW2_ORIG;$FW2_NEW;" /etc/init.d/rcS
+sed -i "s;^$FW3_ORIG;$FW3_NEW;" /etc/init.d/rcS
 
 #cleanup
 rm /etc/udev/rules.d/98-autorunHook.rules

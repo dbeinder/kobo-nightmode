@@ -9,8 +9,8 @@
     #define DEBUGPRINT(_fmt, ...) \
         do { \
             FILE *logFP = fopen(SI_DEBUG_LOGPATH, "a"); \
-            fprintf(logFP, _fmt, ##__VA_ARGS__); \
-            fclose(logFP); \
+            if(logFP) { fprintf(logFP, _fmt, ##__VA_ARGS__); \
+            fclose(logFP); } \
        } while (0)
 #else
     #define DEBUGPRINT(_fmt, ...) /**/
